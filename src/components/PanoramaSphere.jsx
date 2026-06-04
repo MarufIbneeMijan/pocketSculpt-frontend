@@ -9,11 +9,13 @@ export const PanoramaSphere = ({
     hotspots = [], 
     infoTags = [], 
     stagedPosition,
-    onNavigateToRoom // 🚀 NEW: Route navigation callback loop pipeline hook
+    onNavigateToRoom 
 }) => {
     const sphereRef = useRef();
 
     const safePath = imagePath || "/tour_assets/room_0.jpg";
+    
+    // Clean WebGL texture loader stream hook
     const texture = useTexture(safePath);
 
     useEffect(() => {
@@ -24,15 +26,16 @@ export const PanoramaSphere = ({
         }
     }, [texture]);
 
+    // Converts polar coordinates back to 3D Cartesian space smoothly
     const getCoordinatesFromAngles = (yaw, pitch, radius = 430) => {
+        if (isNaN(yaw) || isNaN(pitch)) return [0, 0, 0];
         const radYaw = (yaw * Math.PI) / 180;
         const radPitch = (pitch * Math.PI) / 180;
-
-        const x = radius * Math.cos(radPitch) * Math.sin(radYaw);
-        const y = radius * Math.sin(radPitch);
-        const z = radius * Math.cos(radPitch) * Math.cos(radYaw);
-
-        return [x, y, z];
+        return [
+            radius * Math.cos(radPitch) * Math.sin(radYaw),
+            radius * Math.sin(radPitch),
+            radius * Math.cos(radPitch) * Math.cos(radYaw)
+        ];
     };
 
     return (
@@ -43,41 +46,37 @@ export const PanoramaSphere = ({
                 <meshBasicMaterial map={texture} side={THREE.DoubleSide} />
             </mesh>
 
-            {/* 🔵 NAVIGATION PORTAL PIN RE-MAP CHANNELS */}
+            {/* 🔵 NAVIGATION PORTAL CHANNELS */}
             {Array.isArray(hotspots) && hotspots.map((spot, index) => {
                 if (spot.yaw === undefined || spot.pitch === undefined) return null;
-                const positionCoords = getCoordinatesFromAngles(Number(spot.yaw), Number(spot.pitch));
                 return (
                     <PortalHotspot 
-                        key={`custom-hotspot-${index}`} 
-                        position={positionCoords} 
-                        text={spot.text || "Move Forward"}
+                        key={`custom-hotspot-${index}-${spot.target}`} 
+                        position={getCoordinatesFromAngles(Number(spot.yaw), Number(spot.pitch))} 
                         onClick={() => {
-                            console.log(`[PORTAL ROUTE] Executing shift to destination room string: "${spot.target}"`);
                             if (onNavigateToRoom) onNavigateToRoom(spot.target);
                         }}
                     />
                 );
             })}
 
-            {/* 🟣 AMENITY DETAILS PIN RE-MAP CHANNELS */}
+            {/* 🟣 AMENITY DETAILS PIN CHANNELS */}
             {Array.isArray(infoTags) && infoTags.map((tag, index) => {
                 if (tag.yaw === undefined || tag.pitch === undefined) return null;
-                const positionCoords = getCoordinatesFromAngles(Number(tag.yaw), Number(tag.pitch));
                 return (
                     <InfoTagMarker 
-                        key={`custom-infotag-${index}`} 
-                        position={positionCoords} 
-                        title={tag.title || "Premium Spec Component"}
-                        text={tag.text || "Asset description outlines configurations details."}
+                        key={`custom-infotag-${index}-${tag.title || index}`} 
+                        position={getCoordinatesFromAngles(Number(tag.yaw), Number(tag.pitch))} 
+                        title={tag.title}
+                        text={tag.text || tag.description || tag}
                     />
                 );
             })}
 
             {/* 🟠 LIVE STAGING INDICATOR BLOCK */}
             {stagedPosition && stagedPosition.yaw !== undefined && stagedPosition.pitch !== undefined && (
-                <mesh position={getCoordinatesFromAngles(Number(stagedPosition.yaw), Number(stagedPosition.pitch))} renderOrder={1000}>
-                    <sphereGeometry args={[14, 32, 32]} />
+                <mesh position={getCoordinatesFromAngles(Number(stagedPosition.yaw), Number(stagedPosition.pitch), 425)} renderOrder={1000}>
+                    <sphereGeometry args={[8, 32, 32]} />
                     <meshBasicMaterial color="#f97316" depthTest={false} depthWrite={false} />
                 </mesh>
             )}

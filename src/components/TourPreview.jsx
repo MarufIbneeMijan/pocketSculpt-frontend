@@ -3,6 +3,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { Canvas, useThree } from '@react-three/fiber';
 import { OrbitControls } from '@react-three/drei';
 import { PanoramaSphere } from './PanoramaSphere'; 
+import { SpatialWarpLoader } from './SpatialWarpLoader';
 import { VRButton } from 'three/addons/webxr/VRButton.js'; 
 import { ArrowLeft, HelpCircle, Compass, Cpu, Layers, Ruler, Sliders, Crosshair, HelpCircle as HelpIcon, Sparkles } from 'lucide-react';
 import * as THREE from 'three';
@@ -44,6 +45,9 @@ export const TourPreview = () => {
     const [pointB, setPointB] = useState(null);
     const [calculatedDistance, setCalculatedDistance] = useState(null);
 
+    // --- PIPELINE DETACHED TRANSITION DETECTOR ---
+    const [isTransitionLoading, setIsTransitionLoading] = useState(false);
+
     const fetchProjectDetails = async () => {
         try {
             const response = await fetch(`${API_BASE}/api/projects`);
@@ -83,6 +87,7 @@ export const TourPreview = () => {
             console.log("[LIVE PREVIEW] Restoring first-person coordinate center lens...");
             activeCamera.position.set(0, 0, 0.1); 
             studioControlsRef.current.target.set(0, 0, 0);
+            activeCamera.fov = 85; // Keep the standard wide lens view locked during top flips
             studioControlsRef.current.maxPolarAngle = Math.PI; 
         }
         studioControlsRef.current.update();
@@ -134,7 +139,6 @@ export const TourPreview = () => {
         }
     };
 
-    // 🚀 DYNAMIC INSTRUCTIONAL CALCULATOR GUIDELINE RESOLVER
     const getMeasurementGuideline = () => {
         if (!pointA) return "Double-click anywhere on walls or floors to lock Point A baseline position";
         if (!pointB) return "Point A dropped! Now double-click another surface to find Point B Euclidean distance";
@@ -167,6 +171,8 @@ export const TourPreview = () => {
 
     return (
         <div className="w-screen h-screen bg-black relative font-sans overflow-hidden select-none text-slate-200">
+            {/* 🚀 FIXED NATIVE DETACHED OVERLAY LOADER */}
+            <SpatialWarpLoader isVisible={isTransitionLoading} />
             
             {/* 🚀 TOP LEFT: BACKLINK HUD OVERLAY */}
             {!isLiveSharedView && (
@@ -218,13 +224,14 @@ export const TourPreview = () => {
                     
                     <Canvas 
                         key={`${activeRoomKey}-${currentActiveRoomInstance.hotspots?.length || 0}-${currentActiveRoomInstance.infoTags?.length || 0}`}
-                        camera={{ position: [0, 0, 0.1], fov: 75, near: 0.1, far: 1000 }}
+                        // 🚀 FIXED: Modified initial fov from 75 to 85 to make the startup viewpoint look nicely zoomed out
+                        camera={{ position: [0, 0, 0.1], fov: 95, near: 0.1, far: 1000 }}
                         onWheel={(e) => {
                             if (!studioControlsRef.current || isTopView) return;
                             const activeCamera = studioControlsRef.current.object;
                             if (!activeCamera) return;
                             let freshFovValue = activeCamera.fov + e.deltaY * 0.04;
-                            freshFovValue = Math.max(35, Math.min(95, freshFovValue));
+                            freshFovValue = Math.max(35, Math.min(105, freshFovValue)); // Expand limit boundary
                             activeCamera.fov = freshFovValue;
                             activeCamera.updateProjectionMatrix();
                         }}
@@ -238,10 +245,31 @@ export const TourPreview = () => {
                                     hotspots={currentActiveRoomInstance.hotspots || []} 
                                     infoTags={currentActiveRoomInstance.infoTags || []} 
                                     stagedPosition={null} 
+                                    // 🚀 FIXED: Preload background textures to engage overlay correctly
                                     onNavigateToRoom={(target) => {
                                         if (target && !isTopView) {
-                                            setActiveRoomKey(String(target).toLowerCase().trim());
-                                            setCalcMetrics(null);
+                                            setIsTransitionLoading(true);
+
+                                            // Trace destination data properties safely
+                                            const nextRoom = project.rooms.find(r => String(r.key).toLowerCase().trim() === String(target).toLowerCase().trim());
+                                            const nextImagePath = nextRoom?.image || "/tour_assets/room_0.jpg";
+
+                                            const preloader = new Image();
+                                            preloader.src = nextImagePath;
+                                            
+                                            const startTime = Date.now();
+                                            
+                                            preloader.onload = () => {
+                                                const duration = Date.now() - startTime;
+                                                // Guarantee a minimum of 1.3 seconds hold time so the animation doesn't pop or stutter
+                                                const minimumHoldTime = Math.max(1300 - duration, 0);
+
+                                                setTimeout(() => {
+                                                    setActiveRoomKey(String(target).toLowerCase().trim());
+                                                    setCalcMetrics(null);
+                                                    setIsTransitionLoading(false); // Cleanly drop interface shield
+                                                }, minimumHoldTime);
+                                            };
                                         }
                                     }}
                                 />
@@ -257,7 +285,6 @@ export const TourPreview = () => {
                                     <meshBasicMaterial visible={false} side={THREE.DoubleSide} depthWrite={false} />
                                 </mesh>
 
-                                {/* 📐 LIVE GRAPHICAL PLACEMENT PLOTS */}
                                 {isMeasuring && pointA && (
                                     <mesh position={[pointA.x, pointA.y, pointA.z]}>
                                         <sphereGeometry args={[3.5, 16, 16]} />
@@ -281,7 +308,6 @@ export const TourPreview = () => {
                                 <Crosshair size={12} className="animate-spin-slow text-indigo-400" /> Space Laser Measurer
                             </div>
                             
-                            {/* 💡 LIVE INTERACTION GUIDELINES */}
                             <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex gap-2">
                                 <HelpIcon size={14} className="text-indigo-400 shrink-0 mt-0.5" />
                                 <p className="text-[10px] leading-relaxed text-slate-300 m-0 font-medium font-sans normal-case">{getMeasurementGuideline()}</p>
@@ -338,13 +364,10 @@ export const TourPreview = () => {
                         </div>
                     )}
 
-                    {/* 🧭 BOTTOM GLASS HUD CONTROL matrix PANEL DECK */}
-                    <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3.5 z-40 w-[90%] max-w-sm pointer-events-none">
+                    {/* 🧭 BOTTOM GLASS HUD CONTROL PANEL DECK */}
+                    <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3.5 z-20 w-[90%] max-w-sm pointer-events-none">
                         
-                        {/* 🛠️ CONTROLS ICON DOCK (GLASSMORPHIC HIGH-CONTRAST SELECTIONS) */}
                         <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800/80 p-1.5 rounded-2xl shadow-[0_15px_35px_rgba(0,0,0,0.5)] backdrop-blur-2xl pointer-events-auto">
-                            
-                            {/* Floor Map Button (Amber Theme) */}
                             <button 
                                 type="button" 
                                 onClick={handleToggleTopView}
@@ -360,7 +383,6 @@ export const TourPreview = () => {
                             
                             <div className="w-px h-3.5 bg-slate-800/60" />
                             
-                            {/* Distance Measurer Button (Indigo Theme) */}
                             <button 
                                 type="button" 
                                 onClick={() => { 
@@ -380,7 +402,6 @@ export const TourPreview = () => {
 
                             <div className="w-px h-3.5 bg-slate-800/60" />
 
-                            {/* Vector Angle HUD Button (Emerald Theme) */}
                             <button 
                                 type="button" 
                                 onClick={() => { setShowCalcHUD(!showCalcHUD); setIsMeasuring(false); setCalcMetrics(null); }}
@@ -395,7 +416,6 @@ export const TourPreview = () => {
                             </button>
                         </div>
 
-                        {/* 🔮 DESCRIPTION MATRIX BOX DISPLAY PANEL */}
                         <div className="bg-slate-950/90 border border-slate-800/80 px-5 py-4 rounded-2xl shadow-2xl text-center w-full relative overflow-hidden backdrop-blur-2xl">
                             <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-slate-600/30 to-transparent" />
                             
