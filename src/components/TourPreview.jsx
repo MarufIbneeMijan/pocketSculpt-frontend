@@ -419,10 +419,10 @@ export const TourPreview = () => {
                         <div className="bg-slate-950/90 border border-slate-800/80 px-5 py-4 rounded-2xl shadow-2xl text-center w-full relative overflow-hidden backdrop-blur-2xl">
                             <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-slate-600/30 to-transparent" />
                             
-                            <div className="flex items-center justify-center gap-1.5 text-[9px] font-black uppercase text-indigo-400 tracking-widest mb-1">
+                            {/* <div className="flex items-center justify-center gap-1.5 text-[9px] font-black uppercase text-indigo-400 tracking-widest mb-1">
                                 <Compass size={11} className={isTopView ? "" : "animate-spin-slow"} /> 
                                 {isTopView ? "Orthographic Floorplan View" : "Active Blueprint Node"}
-                            </div>
+                            </div> */}
                             
                             <h2 className="text-xs font-black text-white uppercase tracking-widest m-0">{currentActiveRoomInstance.title}</h2>
                             
