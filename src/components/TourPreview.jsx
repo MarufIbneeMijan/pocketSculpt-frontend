@@ -1,3 +1,4 @@
+// TourPreview.jsx
 import React, { useState, useEffect, useRef, Suspense } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom'; 
 import { Canvas, useThree } from '@react-three/fiber';
@@ -5,7 +6,20 @@ import { OrbitControls } from '@react-three/drei';
 import { PanoramaSphere } from './PanoramaSphere'; 
 import { SpatialWarpLoader } from './SpatialWarpLoader';
 import { VRButton } from 'three/addons/webxr/VRButton.js'; 
-import { ArrowLeft, HelpCircle, Compass, Cpu, Layers, Ruler, Sliders, Crosshair, HelpCircle as HelpIcon, Sparkles } from 'lucide-react';
+import { 
+    ArrowLeft, 
+    HelpCircle, 
+    Compass, 
+    Cpu, 
+    Layers, 
+    Ruler, 
+    Sliders, 
+    Crosshair, 
+    HelpCircle as HelpIcon, 
+    Sparkles,
+    Eye,
+    EyeOff
+} from 'lucide-react';
 import * as THREE from 'three';
 import { API_BASE } from '../config';
 
@@ -48,11 +62,18 @@ export const TourPreview = () => {
     // --- PIPELINE DETACHED TRANSITION DETECTOR ---
     const [isTransitionLoading, setIsTransitionLoading] = useState(false);
 
+    // --- 🌟 THE THREE CORE VISIBILITY TOGGLE STATES ---
+    const [showInfoHUD, setShowInfoHUD] = useState(true);   // Tracks Room Description Card
+    const [showCtaHUD, setShowCtaHUD] = useState(true);     // Tracks Action Callout Overlays
+    const [showToolsHUD, setShowToolsHUD] = useState(true); // Tracks Side Measurement Windows
+
     const fetchProjectDetails = async () => {
         try {
             const response = await fetch(`${API_BASE}/api/projects`);
             const data = await response.json();
-            const targetProject = data.find(p => p._id === id);
+            const targetProject = Array.isArray(data)
+                ? data.find(p => String(p._id) === String(id))
+                : null;
             
             if (targetProject) {
                 setProject(targetProject);
@@ -87,7 +108,7 @@ export const TourPreview = () => {
             console.log("[LIVE PREVIEW] Restoring first-person coordinate center lens...");
             activeCamera.position.set(0, 0, 0.1); 
             studioControlsRef.current.target.set(0, 0, 0);
-            activeCamera.fov = 85; // Keep the standard wide lens view locked during top flips
+            activeCamera.fov = 95; 
             studioControlsRef.current.maxPolarAngle = Math.PI; 
         }
         studioControlsRef.current.update();
@@ -95,7 +116,7 @@ export const TourPreview = () => {
     };
 
     const handleLiveSurfaceVectorCalculation = (e) => {
-        if (!e || !e.point) return;
+        if (!e || !e.point || !showToolsHUD) return; 
         const { x, y, z } = e.point;
 
         if (isMeasuring) {
@@ -149,7 +170,7 @@ export const TourPreview = () => {
         return (
             <div className="w-screen h-screen flex flex-col items-center justify-center bg-[#040712] text-slate-500 font-mono text-xs gap-3">
                 <div className="w-6 h-6 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-                <span className="tracking-widest uppercase text-[10px] font-black text-indigo-400">Buffering Live Immersive Tour Matrix...</span>
+                <span className="tracking-widest uppercase text-[10px] font-black text-indigo-400">Immersive Tour Loading...</span>
             </div>
         );
     }
@@ -174,13 +195,13 @@ export const TourPreview = () => {
             {/* 🚀 FIXED NATIVE DETACHED OVERLAY LOADER */}
             <SpatialWarpLoader isVisible={isTransitionLoading} />
             
-            {/* 🚀 TOP LEFT: BACKLINK HUD OVERLAY */}
+            {/* 🚀 TOP LEFT: ISOLATED BACKLINK BUTTON HANDLE */}
             {!isLiveSharedView && (
                 <div className="absolute top-6 left-6 z-40 flex items-center gap-3">
                     <button 
                         type="button" 
                         onClick={() => navigate(`/editor/${id}`)} 
-                        className="flex items-center gap-2 bg-slate-950/40 border border-slate-800/40 hover:border-indigo-500/40 px-4 py-2.5 rounded-xl text-xs font-black text-slate-200 hover:text-indigo-400 transition-all shadow-2xl backdrop-blur-xl cursor-pointer active:scale-95"
+                        className="flex items-center gap-2 bg-slate-950/40 border border-slate-800/40 hover:border-indigo-500/40 px-4 py-2.5 rounded-xl text-xs font-black text-slate-200 hover:text-indigo-400 transition-all shadow-2xl backdrop-blur-xl cursor-pointer active:scale-95 pointer-events-auto"
                     >
                         <ArrowLeft size={14} /> Back to Studio Editor
                     </button>
@@ -188,7 +209,7 @@ export const TourPreview = () => {
             )}
 
             {/* 🚀 TOP RIGHT: SYSTEM NATIVE HARDWARE MOUNT FOR VR */}
-            <div className="absolute top-6 right-6 z-40">
+            <div className="absolute top-6 right-6 z-40 pointer-events-auto">
                 <div 
                     ref={(node) => {
                         if (node && !node.hasChildNodes() && studioControlsRef.current) {
@@ -223,15 +244,14 @@ export const TourPreview = () => {
                 <div className="w-full h-full relative z-10">
                     
                     <Canvas 
-                        key={`${activeRoomKey}-${currentActiveRoomInstance.hotspots?.length || 0}-${currentActiveRoomInstance.infoTags?.length || 0}`}
-                        // 🚀 FIXED: Modified initial fov from 75 to 85 to make the startup viewpoint look nicely zoomed out
+                        key={`${activeRoomKey}-${currentActiveRoomInstance.hotspots?.length || 0}-${currentActiveRoomInstance.infoTags?.length || 0}-${currentActiveRoomInstance.customCtas?.length || 0}`}
                         camera={{ position: [0, 0, 0.1], fov: 95, near: 0.1, far: 1000 }}
                         onWheel={(e) => {
                             if (!studioControlsRef.current || isTopView) return;
                             const activeCamera = studioControlsRef.current.object;
                             if (!activeCamera) return;
                             let freshFovValue = activeCamera.fov + e.deltaY * 0.04;
-                            freshFovValue = Math.max(35, Math.min(105, freshFovValue)); // Expand limit boundary
+                            freshFovValue = Math.max(35, Math.min(105, freshFovValue)); 
                             activeCamera.fov = freshFovValue;
                             activeCamera.updateProjectionMatrix();
                         }}
@@ -244,13 +264,12 @@ export const TourPreview = () => {
                                     imagePath={currentActiveRoomInstance.image && currentActiveRoomInstance.image !== "/tour_assets/" ? currentActiveRoomInstance.image : "/tour_assets/room_0.jpg"} 
                                     hotspots={currentActiveRoomInstance.hotspots || []} 
                                     infoTags={currentActiveRoomInstance.infoTags || []} 
+                                    customCtas={showCtaHUD ? (currentActiveRoomInstance.customCtas || []) : []} 
                                     stagedPosition={null} 
-                                    // 🚀 FIXED: Preload background textures to engage overlay correctly
                                     onNavigateToRoom={(target) => {
                                         if (target && !isTopView) {
                                             setIsTransitionLoading(true);
 
-                                            // Trace destination data properties safely
                                             const nextRoom = project.rooms.find(r => String(r.key).toLowerCase().trim() === String(target).toLowerCase().trim());
                                             const nextImagePath = nextRoom?.image || "/tour_assets/room_0.jpg";
 
@@ -261,13 +280,12 @@ export const TourPreview = () => {
                                             
                                             preloader.onload = () => {
                                                 const duration = Date.now() - startTime;
-                                                // Guarantee a minimum of 1.3 seconds hold time so the animation doesn't pop or stutter
                                                 const minimumHoldTime = Math.max(1300 - duration, 0);
 
                                                 setTimeout(() => {
                                                     setActiveRoomKey(String(target).toLowerCase().trim());
                                                     setCalcMetrics(null);
-                                                    setIsTransitionLoading(false); // Cleanly drop interface shield
+                                                    setIsTransitionLoading(false); 
                                                 }, minimumHoldTime);
                                             };
                                         }
@@ -285,13 +303,13 @@ export const TourPreview = () => {
                                     <meshBasicMaterial visible={false} side={THREE.DoubleSide} depthWrite={false} />
                                 </mesh>
 
-                                {isMeasuring && pointA && (
+                                {showToolsHUD && isMeasuring && pointA && (
                                     <mesh position={[pointA.x, pointA.y, pointA.z]}>
                                         <sphereGeometry args={[3.5, 16, 16]} />
                                         <meshBasicMaterial color="#ef4444" depthTest={false} depthWrite={false} />
                                     </mesh>
                                 )}
-                                {isMeasuring && pointB && (
+                                {showToolsHUD && isMeasuring && pointB && (
                                     <mesh position={[pointB.x, pointB.y, pointB.z]}>
                                         <sphereGeometry args={[3.5, 16, 16]} />
                                         <meshBasicMaterial color="#3b82f6" depthTest={false} depthWrite={false} />
@@ -301,11 +319,35 @@ export const TourPreview = () => {
                         </Suspense>
                     </Canvas>
 
+                    {/* 📌 SCREEN HUD OVERLAY CTA (RENDER CONTROLLED VIA DECENTRALIZED TOGGLE) */}
+                    {showCtaHUD && !isTopView && currentActiveRoomInstance.customCtas?.filter(c => c.type === "floating").map((cta, index) => (
+                        <div 
+                            key={`hud-cta-preview-${index}`} 
+                            className="absolute bottom-6 right-6 p-5 rounded-[2rem] border border-slate-800/80 bg-slate-950/90 backdrop-blur-md shadow-2xl z-30 w-64 pointer-events-auto border-t-emerald-500/30 animate-fadeIn space-y-3"
+                        >
+                            <div>
+                                <h4 className="text-sm font-bold text-white tracking-tight m-0">{cta.text}</h4>
+                                {cta.description && (
+                                    <p className="text-[11px] text-slate-400 mt-1 mb-0 leading-relaxed font-medium normal-case">
+                                        {cta.description}
+                                    </p>
+                                )}
+                            </div>
+                            <button 
+                                type="button"
+                                onClick={() => window.open(cta.link, '_blank', 'noopener,noreferrer')}
+                                className="w-full rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 py-2.5 text-xs font-black uppercase tracking-widest text-slate-950 shadow-lg transform active:scale-95 transition-all cursor-pointer"
+                            >
+                                Engage Action
+                            </button>
+                        </div>
+                    ))}
+
                     {/* 📐 INDIGO DECK: TWO-POINT SPACE MEASUREMENT CONSOLE HUD */}
-                    {isMeasuring && (
-                        <div className="absolute top-24 left-6 bg-slate-950/80 border border-indigo-500/30 p-5 rounded-2xl font-sans text-xs z-30 w-72 shadow-[0_20px_50px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-fadeIn space-y-3.5">
+                    {showToolsHUD && isMeasuring && (
+                        <div className="absolute top-24 left-6 bg-slate-950/80 border border-indigo-500/30 p-5 rounded-2xl font-sans text-xs z-30 w-72 shadow-[0_20px_50px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-fadeIn space-y-3.5 pointer-events-auto">
                             <div className="font-black border-b border-indigo-900/60 pb-2 uppercase tracking-widest text-indigo-400 text-[9px] flex items-center gap-1.5">
-                                <Crosshair size={12} className="animate-spin-slow text-indigo-400" /> Space Laser Measurer
+                                <Crosshair size={12} className="text-indigo-400" /> Space Laser Measurer
                             </div>
                             
                             <div className="p-2.5 bg-indigo-500/10 border border-indigo-500/20 rounded-xl flex gap-2">
@@ -330,7 +372,7 @@ export const TourPreview = () => {
 
                             {calculatedDistance && (
                                 <div className="p-3 bg-gradient-to-br from-indigo-950/50 to-slate-950 border border-indigo-500/40 rounded-xl text-center shadow-inner animate-fadeIn">
-                                    <span className="text-[8px] font-black text-indigo-400 uppercase tracking-widest block mb-0.5">Absolute Clearance Path</span>
+                                    <span className="text-[8px] font-black text-indigo-400 tracking-widest block mb-0.5 heavy uppercase">Absolute Clearance Path</span>
                                     <div className="text-2xl font-black text-white tracking-tight">{calculatedDistance} <span className="text-xs font-sans text-slate-400 lowercase font-medium">meters</span></div>
                                 </div>
                             )}
@@ -346,10 +388,10 @@ export const TourPreview = () => {
                     )}
 
                     {/* 🔬 EMERALD DECK: SPHERICAL NUMERICAL RECONVERSION RAYHUD */}
-                    {showCalcHUD && calcMetrics && (
-                        <div className="absolute top-24 left-6 bg-slate-950/80 border border-emerald-500/30 p-5 rounded-2xl font-mono text-[10px] text-emerald-400 space-y-2.5 z-30 w-72 shadow-[0_20px_50px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-fadeIn">
+                    {showToolsHUD && showCalcHUD && calcMetrics && (
+                        <div className="absolute top-24 left-6 bg-slate-950/80 border border-emerald-500/30 p-5 rounded-2xl font-mono text-[10px] text-emerald-400 space-y-2.5 z-30 w-72 shadow-[0_20px_50px_rgba(0,0,0,0.7)] backdrop-blur-2xl animate-fadeIn pointer-events-auto">
                             <div className="font-sans font-black border-b border-emerald-900/60 pb-2 uppercase tracking-widest text-white text-[9px] flex items-center gap-1.5">
-                                <Cpu size={12} className="text-emerald-400 animate-pulse" /> Ray Intersection Matrix
+                                <Cpu size={12} className="text-emerald-400" /> Ray Intersection Matrix
                             </div>
                             <div className="bg-slate-900/60 p-2.5 border border-slate-800 rounded-xl space-y-1">
                                 <div className="flex justify-between"><span className="text-slate-500">Vector X:</span><span className="text-slate-200 font-bold">{calcMetrics.x}</span></div>
@@ -365,7 +407,7 @@ export const TourPreview = () => {
                     )}
 
                     {/* 🧭 BOTTOM GLASS HUD CONTROL PANEL DECK */}
-                    <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3.5 z-20 w-[90%] max-w-sm pointer-events-none">
+                    <div className="absolute bottom-6 left-1/2 transform -translate-x-1/2 flex flex-col items-center gap-3.5 z-20 w-[90%] max-w-md pointer-events-none">
                         
                         <div className="flex items-center gap-2 bg-slate-950/80 border border-slate-800/80 p-1.5 rounded-2xl shadow-[0_15px_35px_rgba(0,0,0,0.5)] backdrop-blur-2xl pointer-events-auto">
                             <button 
@@ -386,12 +428,13 @@ export const TourPreview = () => {
                             <button 
                                 type="button" 
                                 onClick={() => { 
+                                    if (!showToolsHUD) setShowToolsHUD(true); // Auto-restore if user fires tool intent
                                     setIsMeasuring(!isMeasuring);
                                     setShowCalcHUD(false); 
                                     setPointA(null); setPointB(null); setCalculatedDistance(null);
                                 }}
                                 className={`p-2.5 rounded-xl transition-all duration-300 cursor-pointer border font-bold ${
-                                    isMeasuring 
+                                    isMeasuring && showToolsHUD
                                         ? 'bg-indigo-600 text-white border-indigo-400 scale-105 shadow-[0_0_15px_rgba(99,102,241,0.5)]' 
                                         : 'text-slate-400 border-transparent hover:text-indigo-400 hover:bg-indigo-950/20'
                                 }`}
@@ -404,9 +447,14 @@ export const TourPreview = () => {
 
                             <button 
                                 type="button" 
-                                onClick={() => { setShowCalcHUD(!showCalcHUD); setIsMeasuring(false); setCalcMetrics(null); }}
+                                onClick={() => { 
+                                    if (!showToolsHUD) setShowToolsHUD(true);
+                                    setShowCalcHUD(!showCalcHUD); 
+                                    setIsMeasuring(false); 
+                                    setCalcMetrics(null); 
+                                }}
                                 className={`p-2.5 rounded-xl transition-all duration-300 cursor-pointer border font-bold ${
-                                    showCalcHUD 
+                                    showCalcHUD && showToolsHUD
                                         ? 'bg-emerald-600 text-white border-emerald-400 scale-105 shadow-[0_0_15px_rgba(16,185,129,0.5)]' 
                                         : 'text-slate-400 border-transparent hover:text-emerald-400 hover:bg-emerald-950/20'
                                 }`}
@@ -414,28 +462,77 @@ export const TourPreview = () => {
                             >
                                 <Sliders size={13} />
                             </button>
+
+                            {/* 🌟 NEW DECENTRALIZED EYE ICON 1: TOGGLE PROPERTY DESCRIPTION HUD */}
+                            <div className="w-px h-3.5 bg-slate-800/60" />
+                            <button 
+                                type="button" 
+                                onClick={() => setShowInfoHUD(!showInfoHUD)}
+                                className={`p-2.5 rounded-xl transition-all duration-300 cursor-pointer border font-bold ${
+                                    showInfoHUD 
+                                        ? 'bg-cyan-500/20 text-cyan-400 border-cyan-500/30' 
+                                        : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/60'
+                                }`}
+                                title={showInfoHUD ? "Hide Description HUD" : "Show Description HUD"}
+                            >
+                                {showInfoHUD ? <Eye size={13} /> : <EyeOff size={13} />}
+                            </button>
+
+                            {/* 🌟 NEW DECENTRALIZED EYE ICON 2: TOGGLE FLOATING ACTION CTAS OVERLAYS */}
+                            <div className="w-px h-3.5 bg-slate-800/60" />
+                            <button 
+                                type="button" 
+                                onClick={() => setShowCtaHUD(!showCtaHUD)}
+                                className={`p-2.5 rounded-xl transition-all duration-300 cursor-pointer border font-bold ${
+                                    showCtaHUD 
+                                        ? 'bg-emerald-500/20 text-emerald-400 border-emerald-500/30' 
+                                        : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/60'
+                                }`}
+                                title={showCtaHUD ? "Hide CTAs" : "Show CTAs"}
+                            >
+                                {showCtaHUD ? <Eye size={13} className="text-emerald-400" /> : <EyeOff size={13} />}
+                            </button>
+
+                            {/* 🌟 NEW DECENTRALIZED EYE ICON 3: TOGGLE MEASUREMENT HUD SIDEWINDOWS */}
+                            <div className="w-px h-3.5 bg-slate-800/60" />
+                            <button 
+                                type="button" 
+                                onClick={() => {
+                                    setShowToolsHUD(!showToolsHUD);
+                                    if (showToolsHUD) {
+                                        setIsMeasuring(false);
+                                        setShowCalcHUD(false);
+                                    }
+                                }}
+                                className={`p-2.5 rounded-xl transition-all duration-300 cursor-pointer border font-bold ${
+                                    showToolsHUD 
+                                        ? 'bg-indigo-500/20 text-indigo-400 border-indigo-500/30' 
+                                        : 'text-slate-500 border-transparent hover:text-slate-300 hover:bg-slate-900/60'
+                                }`}
+                                title={showToolsHUD ? "Hide Tools HUD Data" : "Show Tools HUD Data"}
+                            >
+                                {showToolsHUD ? <Eye size={13} className="text-indigo-400" /> : <EyeOff size={13} />}
+                            </button>
                         </div>
 
-                        <div className="bg-slate-950/90 border border-slate-800/80 px-5 py-4 rounded-2xl shadow-2xl text-center w-full relative overflow-hidden backdrop-blur-2xl">
-                            <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-slate-600/30 to-transparent" />
-                            
-                            {/* <div className="flex items-center justify-center gap-1.5 text-[9px] font-black uppercase text-indigo-400 tracking-widest mb-1">
-                                <Compass size={11} className={isTopView ? "" : "animate-spin-slow"} /> 
-                                {isTopView ? "Orthographic Floorplan View" : "Active Blueprint Node"}
-                            </div> */}
-                            
-                            <h2 className="text-xs font-black text-white uppercase tracking-widest m-0">{currentActiveRoomInstance.title}</h2>
-                            
-                            {!isTopView && currentActiveRoomInstance.description && (
-                                <p className="text-[10px] text-slate-300 font-medium leading-relaxed m-0 mt-2 normal-case border-t border-slate-900 pt-2.5">{currentActiveRoomInstance.description}</p>
-                            )}
-                            
-                            {showCalcHUD && !calcMetrics && !isTopView && (
-                                <div className="text-[8px] text-emerald-400 font-mono tracking-wider font-bold mt-2 border-t border-slate-900 pt-2 uppercase animate-pulse flex items-center justify-center gap-1">
-                                    <Sparkles size={10} /> Double-tap walls to decode matrix coordinates
-                                </div>
-                            )}
-                        </div>
+                        {/* 🏢 ROOM TITLE & DETAIL ENTRY CARD PANEL (GUARDED VIA SHOWINFOHUD) */}
+                        {showInfoHUD && (
+                            <div className="bg-slate-950/90 border border-slate-800/80 px-5 py-4 rounded-2xl shadow-2xl text-center w-full relative overflow-hidden backdrop-blur-2xl pointer-events-auto animate-fadeIn">
+                                <div className="absolute top-0 left-0 w-full h-[1px] bg-gradient-to-r from-transparent via-slate-600/30 to-transparent" />
+                                
+                                <h2 className="text-xs font-black text-white uppercase tracking-widest m-0">{currentActiveRoomInstance.title}</h2>
+                                
+                                {!isTopView && currentActiveRoomInstance.description && (
+                                    <p className="text-[10px] text-slate-300 font-medium leading-relaxed m-0 mt-2 normal-case border-t border-slate-900 pt-2.5">{currentActiveRoomInstance.description}</p>
+                                )}
+                                
+                                {showToolsHUD && showCalcHUD && !calcMetrics && !isTopView && (
+                                    <div className="text-[8px] text-emerald-400 font-mono tracking-wider font-bold mt-2 border-t border-slate-900 pt-2 uppercase animate-pulse flex items-center justify-center gap-1">
+                                        <Sparkles size={10} /> Double-tap walls to decode matrix coordinates
+                                    </div>
+                                )}
+                            </div>
+                        )}
                     </div>
                 </div>
             ) : (

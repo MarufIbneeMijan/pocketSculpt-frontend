@@ -1,3 +1,4 @@
+// TourEditor.jsx
 import React, { useState, useEffect, useRef, Suspense } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Canvas } from "@react-three/fiber";
@@ -39,6 +40,16 @@ export const TourEditor = () => {
   const [hotspotText, setHotspotText] = useState("");
   const [tagTitle, setTagTitle] = useState("");
   const [tagDesc, setTagDesc] = useState("");
+
+  // Custom Call-To-Action (CTA) Feature State Hooks
+  const [ctaPlacementType, setCtaPlacementType] = useState("floating");
+  const [ctaButtonText, setCtaButtonText] = useState("");
+  const [ctaDescription, setCtaDescription] = useState("");
+  const [ctaUrlLink, setCtaUrlLink] = useState("");
+  const [editingCtaIndex, setEditingCtaIndex] = useState(null);
+
+  const [toastMessage, setToastMessage] = useState(null);
+  const [toastType, setToastType] = useState("success");
 
   const studioControlsRef = useRef(null);
 
@@ -120,7 +131,6 @@ export const TourEditor = () => {
 
     projectCopy.rooms[activeRoomIndex].title = roomTitle.trim();
     projectCopy.rooms[activeRoomIndex].description = roomDesc.trim();
-    projectCopy.rooms[activeRoomIndex].roomDesc = roomDesc.trim();
 
     setIsSavingRoom(true);
     try {
@@ -144,14 +154,29 @@ export const TourEditor = () => {
     setConfirmAction({ type, index, title, message, confirmLabel });
   };
 
+  const triggerToastNotification = (message, type = "success") => {
+  setToastMessage(message);
+  setToastType(type);
+  
+  // Clear notification automatically after 3 seconds
+  setTimeout(() => {
+    setToastMessage(null);
+  }, 3000);
+};
+
   const closeConfirmDialog = () => setConfirmAction(null);
 
   const handleConfirmAction = async () => {
     if (!confirmAction) return;
     if (confirmAction.type === "hotspot") {
       await handleDeleteHotspotNode(confirmAction.index);
+      triggerToastNotification("🗑 Navigation link purged", "deleted");
     } else if (confirmAction.type === "infoTag") {
       await handleDeleteInfoTagNode(confirmAction.index);
+      triggerToastNotification("🗑 Amenity details purged", "deleted");
+    } else if (confirmAction.type === "customCta") {
+      await handleDeleteCustomCtaNode(confirmAction.index);
+      triggerToastNotification("🗑 Call-to-Action purged", "deleted");
     }
     closeConfirmDialog();
   };
@@ -213,6 +238,7 @@ export const TourEditor = () => {
     setInteractionMode("hotspot");
     setEditingHotspotIndex(index);
     setEditingInfoTagIndex(null);
+    setEditingCtaIndex(null);
     setHotspotTargetKey(spot.target || "");
     setHotspotText(spot.text || "");
     setStagedPosition({ yaw: spot.yaw, pitch: spot.pitch });
@@ -223,26 +249,87 @@ export const TourEditor = () => {
     setInteractionMode("infotag");
     setEditingInfoTagIndex(index);
     setEditingHotspotIndex(null);
+    setEditingCtaIndex(null);
     setTagTitle(tag.title || "");
     setTagDesc(tag.text || "");
     setStagedPosition({ yaw: tag.yaw, pitch: tag.pitch });
     setIsStagedConfirmed(true);
   };
 
-  const handleConfirmAndDeployNode = async () => {
-    if (!stagedPosition) return alert("Please select or stage a 3D coordinate point first.");
-    if (!project?.rooms?.length) return;
+  const handleTriggerCustomCtaEditMode = (index, cta) => {
+    setInteractionMode("customCta");
+    setEditingCtaIndex(index);
+    setEditingHotspotIndex(null);
+    setEditingInfoTagIndex(null);
+    setCtaPlacementType(cta.type || "floating");
+    setCtaButtonText(cta.text || "");
+    setCtaDescription(cta.description || "");
+    setCtaUrlLink(cta.link || "");
+    if (cta.type === "spatial") {
+      setStagedPosition({ yaw: cta.yaw, pitch: cta.pitch });
+      setIsStagedConfirmed(true);
+    } else {
+      setStagedPosition(null);
+      setIsStagedConfirmed(false);
+    }
+  };
 
+  const syncMarkersWithBackend = async (freshHotspots, freshInfoTags, freshCustomCtas) => {
+    if (!currentStagedRoomInstance) return;
     const projectCopy = JSON.parse(JSON.stringify(project));
     const activeRoomIndex = projectCopy.rooms.findIndex(
-      (r) =>
-        String(r.key).toLowerCase().trim() ===
-        String(activeRoomKey).toLowerCase().trim()
+      (r) => String(r.key).toLowerCase().trim() === String(activeRoomKey).toLowerCase().trim()
     );
-    if (activeRoomIndex === -1) return alert("Internal layout structure error.");
+    if (activeRoomIndex === -1) return alert("Internal synchronization layout discrepancy.");
+
+    projectCopy.rooms[activeRoomIndex].hotspots = freshHotspots;
+    projectCopy.rooms[activeRoomIndex].infoTags = freshInfoTags;
+    projectCopy.rooms[activeRoomIndex].customCtas = freshCustomCtas;
+
+    try {
+      const response = await fetch(`${API_BASE}/api/projects/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ rooms: projectCopy.rooms }),
+      });
+      if (!response.ok) throw new Error("Sync operation rejected by enterprise pipeline.");
+      const data = await response.json();
+      setProject(data);
+
+      if (interactionMode === "customCta") {
+      if (editingCtaIndex !== null) {
+        triggerToastNotification("✓ Call-to-Action target successfully modified", "info");
+      } else {
+        triggerToastNotification("⚡ Brand Call-to-Action successfully deployed live!", "success");
+      }
+    } else if (interactionMode === "hotspot") {
+      triggerToastNotification("✓ Navigation node synchronized");
+    } else if (interactionMode === "infotag") {
+      triggerToastNotification("✓ Amenity tracking details updated");
+    }
+
+
+      setStagedPosition(null);
+      setIsStagedConfirmed(false);
+      setEditingHotspotIndex(null);
+      setEditingInfoTagIndex(null);
+      setEditingCtaIndex(null);
+    } catch (err) {
+      console.error("Database sync runtime failure:", err);
+      alert("Failed to commit data modifications to the remote asset grid cluster.");
+    }
+  };
+
+  const handleConfirmAndDeployNode = async () => {
+    if (!currentStagedRoomInstance) return;
+
+    const updatedHotspots = [...(currentStagedRoomInstance.hotspots || [])];
+    const updatedInfoTags = [...(currentStagedRoomInstance.infoTags || [])];
+    const updatedCustomCtas = [...(currentStagedRoomInstance.customCtas || [])];
 
     if (interactionMode === "hotspot") {
-      if (projectCopy.rooms.length <= 1) return alert("Add more rooms first.");
+      if (!stagedPosition) return alert("Please select or stage a 3D coordinate point first.");
+      if (project.rooms.length <= 1) return alert("Add more rooms first.");
       if (!hotspotTargetKey) return alert("Please choose a destination room connection.");
 
       const hotspotPayload = {
@@ -252,17 +339,16 @@ export const TourEditor = () => {
         pitch: stagedPosition.pitch,
       };
 
-      projectCopy.rooms[activeRoomIndex].hotspots ||= [];
       if (editingHotspotIndex !== null) {
-        projectCopy.rooms[activeRoomIndex].hotspots[editingHotspotIndex] = hotspotPayload;
+        updatedHotspots[editingHotspotIndex] = hotspotPayload;
       } else {
-        projectCopy.rooms[activeRoomIndex].hotspots.push(hotspotPayload);
+        updatedHotspots.push(hotspotPayload);
       }
 
       setHotspotTargetKey("");
       setHotspotText("");
-      setEditingHotspotIndex(null);
-    } else {
+    } else if (interactionMode === "infotag") {
+      if (!stagedPosition) return alert("Please select or stage a 3D coordinate point first.");
       if (!tagTitle.trim()) return alert("Please enter an amenity heading title.");
 
       const tagPayload = {
@@ -272,84 +358,64 @@ export const TourEditor = () => {
         pitch: stagedPosition.pitch,
       };
 
-      projectCopy.rooms[activeRoomIndex].infoTags ||= [];
       if (editingInfoTagIndex !== null) {
-        projectCopy.rooms[activeRoomIndex].infoTags[editingInfoTagIndex] = tagPayload;
+        updatedInfoTags[editingInfoTagIndex] = tagPayload;
       } else {
-        projectCopy.rooms[activeRoomIndex].infoTags.push(tagPayload);
+        updatedInfoTags.push(tagPayload);
       }
 
       setTagTitle("");
       setTagDesc("");
-      setEditingInfoTagIndex(null);
+    } else if (interactionMode === "customCta") {
+      if (ctaPlacementType === "spatial" && !stagedPosition) {
+        return alert("Please stage spatial coordinate parameters onto the 3D room map first.");
+      }
+      if (!ctaButtonText.trim() || !ctaUrlLink.trim()) {
+        return alert("Validation guard notice: CTA Button Title and URL redirect target required.");
+      }
+
+      const ctaPayload = {
+        type: ctaPlacementType,
+        text: ctaButtonText.trim(),
+        description: ctaDescription.trim(),
+        link: ctaUrlLink.trim(),
+        yaw: ctaPlacementType === "spatial" ? stagedPosition.yaw : 0,
+        pitch: ctaPlacementType === "spatial" ? stagedPosition.pitch : 0,
+      };
+
+      if (editingCtaIndex !== null) {
+        updatedCustomCtas[editingCtaIndex] = ctaPayload;
+      } else {
+        updatedCustomCtas.push(ctaPayload);
+      }
+
+      setCtaButtonText("");
+      setCtaDescription("");
+      setCtaUrlLink("");
     }
 
-    try {
-      const response = await fetch(`${API_BASE}/api/projects/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rooms: projectCopy.rooms }),
-      });
-      const data = await response.json();
-      setProject(data);
-      setStagedPosition(null);
-      setIsStagedConfirmed(false);
-      alert("Spatial marker registry successfully synchronized and saved!");
-    } catch (err) {
-      console.error("Database mutation failed:", err);
-    }
+    await syncMarkersWithBackend(updatedHotspots, updatedInfoTags, updatedCustomCtas);
   };
 
   const handleDeleteHotspotNode = async (targetIndex) => {
-    if (!project?.rooms?.length) return;
-    const projectCopy = JSON.parse(JSON.stringify(project));
-    const activeRoomIndex = projectCopy.rooms.findIndex(
-      (r) =>
-        String(r.key).toLowerCase().trim() ===
-        String(activeRoomKey).toLowerCase().trim()
-    );
-    if (activeRoomIndex === -1) return;
-
-    projectCopy.rooms[activeRoomIndex].hotspots ||= [];
-    projectCopy.rooms[activeRoomIndex].hotspots.splice(targetIndex, 1);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/projects/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rooms: projectCopy.rooms }),
-      });
-      const updatedData = await response.json();
-      setProject(updatedData);
-    } catch (err) {
-      console.error("Error removing hotspot:", err);
-    }
+    if (!currentStagedRoomInstance) return;
+    const freshHotspots = [...(currentStagedRoomInstance.hotspots || [])];
+    freshHotspots.splice(targetIndex, 1);
+    await syncMarkersWithBackend(freshHotspots, currentStagedRoomInstance.infoTags || [], currentStagedRoomInstance.customCtas || []);
   };
 
   const handleDeleteInfoTagNode = async (targetIndex) => {
-    if (!project?.rooms?.length) return;
-    const projectCopy = JSON.parse(JSON.stringify(project));
-    const activeRoomIndex = projectCopy.rooms.findIndex(
-      (r) =>
-        String(r.key).toLowerCase().trim() ===
-        String(activeRoomKey).toLowerCase().trim()
-    );
-    if (activeRoomIndex === -1) return;
+    if (!currentStagedRoomInstance) return;
+    const freshInfoTags = [...(currentStagedRoomInstance.infoTags || [])];
+    freshInfoTags.splice(targetIndex, 1);
+    await syncMarkersWithBackend(currentStagedRoomInstance.hotspots || [], freshInfoTags, currentStagedRoomInstance.customCtas || []);
+  };
 
-    projectCopy.rooms[activeRoomIndex].infoTags ||= [];
-    projectCopy.rooms[activeRoomIndex].infoTags.splice(targetIndex, 1);
-
-    try {
-      const response = await fetch(`${API_BASE}/api/projects/${id}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ rooms: projectCopy.rooms }),
-      });
-      const updatedData = await response.json();
-      setProject(updatedData);
-    } catch (err) {
-      console.error("Error removing info tag:", err);
-    }
+  const handleDeleteCustomCtaNode = async (targetIndex) => {
+    if (!currentStagedRoomInstance) return;
+    const freshCustomCtas = [...(currentStagedRoomInstance.customCtas || [])];
+    freshCustomCtas.splice(targetIndex, 1);
+    await syncMarkersWithBackend(currentStagedRoomInstance.hotspots || [], currentStagedRoomInstance.infoTags || [], freshCustomCtas);
   };
 
   if (loading) {
@@ -426,7 +492,7 @@ export const TourEditor = () => {
           {currentStagedRoomInstance ? (
             <div className="w-full h-full relative">
               <Canvas
-                key={`${activeRoomKey}-${currentStagedRoomInstance.hotspots?.length || 0}-${currentStagedRoomInstance.infoTags?.length || 0}`}
+                key={`${activeRoomKey}-${currentStagedRoomInstance.hotspots?.length || 0}-${currentStagedRoomInstance.infoTags?.length || 0}-${currentStagedRoomInstance.customCtas?.length || 0}`}
                 camera={{ position: [0, 0, 0.1], fov: 75, near: 0.1, far: 1000 }}
                 onWheel={(e) => {
                   if (!studioControlsRef.current) return;
@@ -457,12 +523,13 @@ export const TourEditor = () => {
                       }
                       hotspots={currentStagedRoomInstance.hotspots || []}
                       infoTags={currentStagedRoomInstance.infoTags || []}
+                      customCtas={currentStagedRoomInstance.customCtas || []}
                       stagedPosition={stagedPosition}
                     />
                     <mesh
                       onDoubleClick={(e) => {
                         e.stopPropagation();
-                        if (isStagedConfirmed) return;
+                        if (isStagedConfirmed && interactionMode !== "customCta") return;
                         handleWebGLMeshSurfaceIntersection(e);
                       }}
                     >
@@ -472,6 +539,23 @@ export const TourEditor = () => {
                   </group>
                 </Suspense>
               </Canvas>
+
+              {/* FLOATING ACTION HUD CTA RENDERING (SCREEN SPACE LAYER) */}
+              {currentStagedRoomInstance.customCtas?.filter(c => c.type === "floating").map((cta, index) => (
+                <div 
+                  key={`hud-layer-overlay-${index}`} 
+                  className="absolute bottom-6 right-6 p-5 rounded-[2rem] border border-slate-800/80 bg-slate-950/90 backdrop-blur-md shadow-2xl z-10 w-64 pointer-events-auto border-t-emerald-500/30 animate-fadeIn"
+                >
+                  <h4 className="text-sm font-bold text-white tracking-tight">{cta.text}</h4>
+                  {cta.description && <p className="text-[11px] text-slate-400 mt-1 leading-relaxed">{cta.description}</p>}
+                  <button 
+                    onClick={() => window.open(cta.link, '_blank')}
+                    className="w-full mt-3 rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 py-2 text-xs font-black uppercase tracking-wider text-slate-950 shadow-md transform active:scale-95 transition-transform"
+                  >
+                    Engage Platform
+                  </button>
+                </div>
+              ))}
 
               <div className="absolute top-4 left-4 right-4 rounded-[1.5rem] border border-slate-800/80 bg-slate-950/90 backdrop-blur-md p-3 text-sm text-slate-200 shadow-2xl z-10 pointer-events-none">
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
@@ -829,6 +913,7 @@ export const TourEditor = () => {
                                   setIsStagedConfirmed(false);
                                   setEditingHotspotIndex(null);
                                   setEditingInfoTagIndex(null);
+                                  setEditingCtaIndex(null);
                                   setHotspotTargetKey("");
                                   setHotspotText("");
                                   setTagTitle("");
@@ -988,28 +1073,144 @@ export const TourEditor = () => {
                       )}
 
                       {sceneTab === "cta" && (
-                        <div className="space-y-4">
+                        <div className="space-y-4 animate-fadeIn">
                           <div className="rounded-3xl border border-slate-800/70 bg-slate-950/80 p-4">
-                            <p className="text-xs uppercase tracking-[0.24em] text-slate-400">
+                            <p className="text-xs uppercase tracking-[0.24em] text-slate-400 mb-4">
                               Custom Call-to-Action Buttons
                             </p>
-                            <div className="mt-3 space-y-3">
+                            <div className="space-y-3">
+                              <div>
+                                <label className="text-[10px] font-semibold text-slate-500 uppercase block mb-1">
+                                  Placement Mode
+                                </label>
+                                <select 
+                                  className="w-full rounded-3xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-xs text-slate-200 outline-none"
+                                  value={ctaPlacementType}
+                                  onChange={(e) => {
+                                    setCtaPlacementType(e.target.value);
+                                    setInteractionMode("customCta");
+                                    if (e.target.value === "floating") {
+                                      setStagedPosition(null);
+                                      setIsStagedConfirmed(false);
+                                    }
+                                  }}
+                                >
+                                  <option value="floating">📌 Screen HUD Overlay (Persistent)</option>
+                                  <option value="spatial">🌐 3D Spatial Node (Requires View Staging)</option>
+                                </select>
+                              </div>
+
+                              {ctaPlacementType === "spatial" && !isStagedConfirmed && (
+                                <div className="p-3 border border-dashed border-emerald-500/30 rounded-xl bg-emerald-500/5 text-center text-[9px] font-black uppercase text-emerald-400 tracking-wider">
+                                  ⚡ Double-click inside the 3D room canvas frame to lock position first!
+                                </div>
+                              )}
+
                               <input
                                 type="text"
                                 className="w-full rounded-3xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 outline-none"
-                                placeholder="CTA button text..."
+                                placeholder="CTA Button Heading (e.g., Book Viewing)"
+                                value={ctaButtonText}
+                                onChange={(e) => {
+                                  setInteractionMode("customCta");
+                                  setCtaButtonText(e.target.value);
+                                }}
                               />
+                              
                               <textarea
                                 className="w-full rounded-3xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 outline-none h-20 resize-none"
-                                placeholder="CTA description..."
+                                placeholder="Brief descriptive layout context summary text..."
+                                value={ctaDescription}
+                                onChange={(e) => {
+                                  setInteractionMode("customCta");
+                                  setCtaDescription(e.target.value);
+                                }}
                               />
+
+                              <input
+                                type="text"
+                                className="w-full rounded-3xl border border-slate-800 bg-slate-950/80 px-4 py-3 text-sm text-slate-100 outline-none"
+                                placeholder="Target Action URL Link (https://...)"
+                                value={ctaUrlLink}
+                                onChange={(e) => {
+                                  setInteractionMode("customCta");
+                                  setCtaUrlLink(e.target.value);
+                                }}
+                              />
+
+                              {ctaPlacementType === "spatial" && isStagedConfirmed && (
+                                <div className="text-[10px] font-mono p-2 bg-slate-950/60 border border-slate-900 rounded-xl text-slate-400 text-center">
+                                  Staged Vector Coordinates: Yaw: {stagedPosition?.yaw}° | Pitch: {stagedPosition?.pitch}°
+                                </div>
+                              )}
+
                               <button
                                 type="button"
-                                className="w-full rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-950"
+                                onClick={handleConfirmAndDeployNode}
+                                disabled={ctaPlacementType === "spatial" && !isStagedConfirmed}
+                                className="w-full rounded-2xl bg-gradient-to-r from-emerald-500 to-green-500 px-4 py-2.5 text-xs font-semibold uppercase tracking-[0.16em] text-slate-950 disabled:opacity-40 disabled:cursor-not-allowed transition"
                               >
-                                + Add Custom CTA
+                                {editingCtaIndex !== null ? "Update Custom CTA" : "+ Add Custom CTA"}
                               </button>
                             </div>
+                          </div>
+
+                          {/* LIST CONFIGURED CUSTOM CTAS TARGET FIELD */}
+                          <div className="space-y-2">
+                            <h5 className="text-[10px] font-black text-emerald-400 uppercase tracking-widest flex items-center gap-1.5">
+                              <Sliders size={11} /> Configured CTAs ({currentStagedRoomInstance.customCtas?.length || 0})
+                            </h5>
+                            {!currentStagedRoomInstance.customCtas || currentStagedRoomInstance.customCtas.length === 0 ? (
+                              <div className="text-[9px] text-slate-600 uppercase tracking-wider p-2.5 bg-slate-950/20 border border-slate-950 rounded-xl text-center">
+                                Zero Call-To-Actions configured for this space index.
+                              </div>
+                            ) : (
+                              <div className="max-h-48 overflow-y-auto space-y-1 pr-1 border border-slate-950/60 bg-slate-950/20 p-1.5 rounded-xl">
+                                {currentStagedRoomInstance.customCtas.map((cta, index) => (
+                                  <div
+                                    key={`side-cta-${index}`}
+                                    className={`flex justify-between items-center px-2.5 py-2 rounded-lg text-[10px] font-bold border ${
+                                      editingCtaIndex === index
+                                        ? "bg-emerald-600/10 border-emerald-500/30 text-emerald-400"
+                                        : "bg-slate-950 border-slate-900 text-slate-400"
+                                    }`}
+                                  >
+                                    <div className="truncate flex-1 pr-2">
+                                      <span className="text-emerald-500 text-[8px] font-mono font-black uppercase tracking-wider block">
+                                        [{cta.type.toUpperCase()}]
+                                      </span>
+                                      <span className="truncate block mt-0.5 font-medium text-slate-300">
+                                        "{cta.text}"
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2 shrink-0">
+                                      <button
+                                        type="button"
+                                        onClick={() => handleTriggerCustomCtaEditMode(index, cta)}
+                                        className="text-slate-500 hover:text-emerald-400 text-[9px] uppercase tracking-wider font-extrabold"
+                                      >
+                                        Edit
+                                      </button>
+                                      <button
+                                        type="button"
+                                        onClick={() =>
+                                          openConfirmDialog({
+                                            type: "customCta",
+                                            index,
+                                            title: "Remove Call-To-Action Element",
+                                            message: "Permanently delete this custom CTA trigger component from the room configuration tree?",
+                                            confirmLabel: "Delete CTA Element",
+                                          })
+                                        }
+                                        className="text-slate-600 hover:text-red-400 text-[9px] uppercase tracking-wider font-extrabold"
+                                      >
+                                        Delete
+                                      </button>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
                           </div>
                         </div>
                       )}
@@ -1035,6 +1236,26 @@ export const TourEditor = () => {
           </div>
         </div>
       </main>
+
+{/* 📡 SLICK, TIMED GLASSMORPHIC NOTIFICATION HUD TOAST */}
+      {toastMessage && (
+        <div className={`absolute top-6 left-1/2 transform -translate-x-1/2 z-50 flex items-center gap-3 px-5 py-3 rounded-2xl border text-xs font-black uppercase tracking-widest shadow-2xl backdrop-blur-xl animate-slideDown max-w-md text-center transition-all ${
+          toastType === "success" 
+            ? "bg-emerald-950/70 border-emerald-500/40 text-emerald-400 shadow-emerald-500/10" 
+            : toastType === "info"
+            ? "bg-sky-950/70 border-sky-500/40 text-sky-400 shadow-sky-500/10"
+            : "bg-red-950/70 border-red-500/40 text-red-400 shadow-red-500/10"
+        }`}>
+          {/* Subtle glowing indicator orb */}
+          <span className={`h-2 w-2 rounded-full animate-pulse shrink-0 ${
+            toastType === "success" ? "bg-emerald-400" : toastType === "info" ? "bg-sky-400" : "bg-red-400"
+          }`} />
+          
+          <span className="font-sans normal-case text-slate-200 text-sm font-medium tracking-normal">
+            {toastMessage}
+          </span>
+        </div>
+      )}
 
       <ConfirmDialog
         open={!!confirmAction}
